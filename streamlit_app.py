@@ -1,75 +1,35 @@
 import streamlit as st
-from selenium import webdriver
-from selenium.webdriver.chrome.service import Service
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
+import requests
+from bs4 import BeautifulSoup
 from docx import Document
 from io import BytesIO
-import time
 import base64
 
-def setup_driver():
-    chrome_options = Options()
-    chrome_options.add_argument("--headless")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    
-    # Default ChromeDriver configuration for Streamlit Cloud
-    driver = webdriver.Chrome(options=chrome_options)
-    return driver
-
-@st.cache_resource
+@st.cache_data
 def search_naver_news(keyword, num_articles):
-    driver = setup_driver()
-    url = f"https://search.naver.com/search.naver?where=news&query={keyword}&sm=tab_jum&sort=0&photo=0&field=0&reporter_article=&pd=0&ds=&de=&docid=&nso=so:r,p:all,a:all&mynews=0&cluster_rank=53&start=1&refresh_start=0"
-    driver.get(url)
+    url = f"https://search.naver.com/search.naver?where=news&query={keyword}&sm=tab_jum&sort=0"
+    response = requests.get(url)
+    soup = BeautifulSoup(response.text, 'lxml')
 
     news_list = []
     seen_titles = set()
-    
-    try:
-        while len(news_list) < num_articles:
-            WebDriverWait(driver, 10).until(
-                EC.presence_of_all_elements_located((By.CSS_SELECTOR, "ul.list_news > li"))
-            )
 
-            news_elements = driver.find_elements(By.CSS_SELECTOR, "ul.list_news > li")
+    news_elements = soup.select("ul.list_news > li")
 
-            for element in news_elements:
-                if len(news_list) >= num_articles:
-                    break
-                try:
-                    title = element.find_element(By.CSS_SELECTOR, "a.news_tit").text
-                    if title not in seen_titles:
-                        seen_titles.add(title)
-                        summary = element.find_element(By.CSS_SELECTOR, "div.news_dsc").text
-                        link = element.find_element(By.CSS_SELECTOR, "a.news_tit").get_attribute("href")
-                        news_list.append({
-                            'title': title,
-                            'summary': summary,
-                            'link': link
-                        })
-                except Exception as e:
-                    print(f"기사 데이터 추출 중 오류 발생: {e}")
+    for element in news_elements[:num_articles]:
+        title = element.select_one("a.news_tit").get_text()
+        summary = element.select_one("div.news_dsc").get_text()
+        link = element.select_one("a.news_tit")['href']
 
-            if len(news_list) < num_articles:
-                try:
-                    next_button = driver.find_element(By.CSS_SELECTOR, "a.btn_next")
-                    next_button.click()
-                    time.sleep(1)
-                except:
-                    break
-            else:
-                break
+        if title not in seen_titles:
+            seen_titles.add(title)
+            news_list.append({
+                'title': title,
+                'summary': summary,
+                'link': link
+            })
 
-    except Exception as e:
-        print(f"뉴스 검색 중 오류 발생: {e}")
-    finally:
-        driver.quit()
-
-    return news_list[:num_articles]
+    return news_list
 
 def create_word_document(news_list, keyword):
     doc = Document()
